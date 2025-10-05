@@ -6,20 +6,22 @@
 
 ## 📁 Project Structure
 
+```
 ir_aviation/
-├─ data/
-│ └─ sample_docs.jsonl # Tiny narratives for smoke tests (JSON Lines)
-├─ src/
-│ ├─ init.py
-│ ├─ preprocessing.py # Tokenization, stopword removal, sentence splitting
-│ ├─ index.py # Inverted index with positional postings
-│ ├─ boolean_query.py # Parser + Boolean + proximity (/n, /s, /p) operators
-│ ├─ bm25.py # BM25 ranker over the same index
-│ └─ eval.py # MAP, nDCG, Recall@k metrics
-├─ notebooks/
-│ └─ 00_quick_demo.ipynb # (Optional) exploratory demo
-├─ run_demo.py # End-to-end quick run on sample docs
-└─ README.md
+  data/
+    sample_docs.jsonl            # (data for use for now) a few tiny narratives for smoke tests
+  src/
+    __init__.py
+    preprocessing.py             # tokenization, stopwords, sentence splits
+    index.py                     # inverted index with positions
+    boolean_query.py             # parser + Boolean/proximity (/n, /s, /p)
+    bm25.py                      # BM25 ranker over the same index
+    eval.py                      # MAP, nDCG, Recall@k
+  notebooks/
+    00_quick_demo.ipynb          # (optional later)
+  run_demo.py                    # quick end-to-end run on sample docs
+  README.md
+```
 
 
 
