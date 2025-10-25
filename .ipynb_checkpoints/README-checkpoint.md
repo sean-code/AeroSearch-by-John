@@ -4,8 +4,6 @@
 
 ---
 
-
-
 ## 📁 Project Structure
 
 ```
@@ -13,12 +11,15 @@ ir_aviation/
   data/
     sample_docs.jsonl            # (data for use for now) a few tiny narratives for smoke tests
   src/
+    __init__.py
     preprocessing.py             # tokenization, stopwords, sentence splits
     index.py                     # inverted index with positions
     boolean_query.py             # parser + Boolean/proximity (/n, /s, /p)
     bm25.py                      # BM25 ranker over the same index
     eval.py                      # MAP, nDCG, Recall@k
-  main.py                    # quick end-to-end run on sample docs
+  notebooks/
+    00_quick_demo.ipynb          # (optional later)
+  run_demo.py                    # quick end-to-end run on sample docs
   README.md
 ```
 
@@ -51,7 +52,3 @@ pip install -r requirements.txt
 
 # 3) Run a smoke test on the tiny dataset
 python run_demo.py --data data/sample_docs.jsonl --query "engine /3 failure AND (smoke OR odor)"
-
-
-
-
