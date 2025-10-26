@@ -283,7 +283,8 @@ def main():
 
     if not args:
         # Prefer your big JSON dump if present, else JSONL, else in-memory demo
-        demo_json = Path("data/sample_docs.json")
+        demo_json = Path("data/sample_docs1.json")
+        # demo_json = Path("data/aviation_selected.json")
         demo_jsonl = Path("data/sample_docs.jsonl")
         if demo_json.exists():
             docs, meta = load_ntsb_json(demo_json)
