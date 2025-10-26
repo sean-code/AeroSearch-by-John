@@ -38,19 +38,4 @@ def preprocess(text: str, stopwords: Set[str] = STOPWORDS) -> Tuple[List[str], L
         sent_tokens.append(toks)
     return flat, sent_tokens
 
-# Add to src/preprocessing.py
-import html
 
-def normalize_text(x: str) -> str:
-    """
-    Clean HTML entities and whitespace artifacts from NTSB text.
-    - Unescape HTML
-    - Replace carriage markers (&#x0D;) with spaces
-    - Collapse multiple whitespace
-    """
-    if not x:
-        return ""
-    x = html.unescape(x)
-    x = x.replace("\r", " ").replace("\n", " ").replace("\u00A0", " ").replace("&#x0D;", " ")
-    x = " ".join(x.split())
-    return x

@@ -38,7 +38,9 @@ def preprocess(text: str, stopwords: Set[str] = STOPWORDS) -> Tuple[List[str], L
         sent_tokens.append(toks)
     return flat, sent_tokens
 
-# Add to src/preprocessing.py
+
+
+# Append to src/preprocessing.py
 import html
 
 def normalize_text(x: str) -> str:

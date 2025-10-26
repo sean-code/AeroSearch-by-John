@@ -11,9 +11,9 @@
 ```
 ir_aviation/
   data/
-    sample_docs.jsonl            # (data for use for now) a few tiny narratives for smoke tests
+    sample_docs.json            # (data for use for now) a few tiny narratives for smoke tests
   src/
-    preprocessing.py             # tokenization, stopwords, sentence splits
+    preprocessing.py             # tokenization, stopwords, sentence splits, normalization
     index.py                     # inverted index with positions
     boolean_query.py             # parser + Boolean/proximity (/n, /s, /p)
     bm25.py                      # BM25 ranker over the same index
@@ -29,7 +29,7 @@ ir_aviation/
 
 | Path                          | Purpose |
 |------------------------------|---------|
-| `data/sample_docs.jsonl`     | Minimal dataset to validate the pipeline quickly. |
+| `data/sample_docs.json`     | Minimal dataset to validate the pipeline quickly. |
 | `src/preprocessing.py`       | Text normalization utilities (tokenize, lower, strip, stopwords, sentence split). |
 | `src/index.py`               | Builds/loads the inverted index with positions (docIDs → term → positions). |
 | `src/boolean_query.py`       | Parses queries and evaluates AND/OR/NOT + proximity `/n`, `/s`, `/p`. |
@@ -50,7 +50,7 @@ python -m venv .venv && source .venv/bin/activate  # on Windows: .venv\Scripts\a
 pip install -r requirements.txt
 
 # 3) Run a smoke test on the tiny dataset
-python run_demo.py --data data/sample_docs.jsonl --query "engine /3 failure AND (smoke OR odor)"
+python main.py 
 
 
 
