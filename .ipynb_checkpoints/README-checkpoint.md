@@ -52,6 +52,23 @@ pip install -r requirements.txt
 # 3) Run a smoke test on the tiny dataset
 python main.py 
 
+# Example After Load:                                                                              
+[i] Loaded 41094 docs from data/sample_docs.json
+[i] Built index over 41094 documents.
+
+Type queries and press Enter.
+
+- BM25 ranked search: just type your query text.
+- Boolean/proximity search: prefix with  'bool: '  then use operators.
+  Examples:
+    bool: ("runway excursion" OR overrun) AND landing
+    bool: (icing /5 pitot) AND (airspeed OR indications)
+    bool: (approach AND mountainous) /s (cfit OR terrain)
+
+Commands:
+  :help             show this help
+  :quit             exit
+  :topk 20          set display cutoff
 
 
 
