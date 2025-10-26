@@ -1,4 +1,4 @@
-# IR Aviation — Incident/Accident Narrative Retrieval
+# AeroSearch — Incident/Accident Narrative Retrieval
 
 > Lightweight IR toolkit for aviation incident/accident narratives with Boolean/proximity search and BM25 ranking.
 
