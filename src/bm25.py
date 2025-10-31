@@ -1,4 +1,3 @@
-# src/bm25.py
 from __future__ import annotations
 import math
 from typing import Dict, List, Tuple, Set

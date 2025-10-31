@@ -19,6 +19,7 @@ ir_aviation/
     bm25.py                     # BM25 ranker over the same index
     eval.py                     # MAP, nDCG, Recall@k
   main.py                       # end-to-end CLI with interactive search (REPL)
+  app.py                       # UI Search platform
   README.md
 
 ```
@@ -71,4 +72,5 @@ Commands:
   :topk 20          set display cutoff
 ```
 
+Happy searching! ✈️
 

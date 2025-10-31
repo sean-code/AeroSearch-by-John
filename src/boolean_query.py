@@ -5,7 +5,6 @@ from typing import List, Set, Dict, Tuple
 from .index import InvertedIndex
 
 # Grammar tokens:
-#   terms, "phrases", /n, /s, /p, AND, OR, NOT, parentheses
 TOK = re.compile(r'"[^"]+"|\(|\)|/s|/p|/[0-9]+|AND|OR|NOT|[a-z0-9\-]+', re.IGNORECASE)
 
 def tokenize_query(q: str) -> List[str]:

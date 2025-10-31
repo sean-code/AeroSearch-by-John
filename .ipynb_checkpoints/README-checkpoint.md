@@ -71,4 +71,5 @@ Commands:
   :topk 20          set display cutoff
 ```
 
+Happy searching! ✈️
 

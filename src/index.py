@@ -1,10 +1,9 @@
-# src/index.py
 from __future__ import annotations
 from typing import Dict, List, Tuple, Iterable
 from collections import defaultdict
 from .preprocessing import preprocess
 
-Posting = Tuple[int, List[int]]  # (doc_id, [positions])
+Posting = Tuple[int, List[int]]  # (doc_id, and the [positions])
 
 class InvertedIndex:
     def __init__(self):
@@ -38,7 +37,7 @@ class InvertedIndex:
             for term, pos_list in tmp.items():
                 self.postings[term].append((doc_id, pos_list))
 
-        # postings sorted by doc_id keeps merges linear
+        # postings sorted by doc_id
         for t in list(self.postings.keys()):
             self.postings[t].sort(key=lambda x: x[0])
 
