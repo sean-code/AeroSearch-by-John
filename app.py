@@ -1,26 +1,36 @@
+# app.py
 import json
 from pathlib import Path
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, List, Any, Tuple
 import pandas as pd
 import streamlit as st
-from datetime import datetime
 
-# --- project modules ---
+# --- import your project modules ---
 from src.index import InvertedIndex
 from src.boolean_query import evaluate_query
 from src.bm25 import BM25
 
-# ---------- Settings ----------
-NARRATIVE_FIELDS = ["ProbableCause","AnalysisNarrative","FactualNarrative","PrelimNarrative"]
-META_FIELDS = [
-    "NtsbNumber","ReportNo","EventDate","City","State","Country",
-    "AirportId","AirportName","EventType","HighestInjury","AccidentSiteCondition",
-    "Latitude","Longitude",
-    "FatalInjuryCount","SeriousInjuryCount","MinorInjuryCount",
-]
-DEFAULT_JSON = "data/sample_docs1.json"  # fixed corpus path
+# ---------- Data loading (reuse your JSON loader logic) ----------
+NARRATIVE_FIELDS = ["ProbableCause", "AnalysisNarrative", "FactualNarrative", "PrelimNarrative"]
 
-# ---------- Helpers ----------
+# Add more research-useful fields to metadata
+META_FIELDS = [
+    # IDs / dates / place
+    "NtsbNumber", "ReportNo", "EventDate", "Country", "City", "State",
+    "AirportId", "AirportName",
+    # event / outcome
+    "EventType", "HighestInjury", "FatalInjuryCount", "SeriousInjuryCount", "MinorInjuryCount",
+    "AirCraftDamage", "AccidentSiteCondition", "WeatherCondition",
+    # coords
+    "Latitude", "Longitude",
+]
+
+# Also try to grab these from Vehicles[0]
+VEHICLE_FIELDS = [
+    "Make", "Model", "AircraftCategory", "DamageLevel", "RegulationFlightConductedUnder",
+    "NumberOfEngines", "OperatorName", "RegistrationNumber", "flightScheduledType", "flightServiceType"
+]
+
 def _concat_narratives(rec: dict) -> str:
     parts: List[str] = []
     for f in NARRATIVE_FIELDS:
@@ -30,31 +40,12 @@ def _concat_narratives(rec: dict) -> str:
             parts.append(v)
     return "  ".join(parts).strip()
 
-def _safe_float(x) -> Optional[float]:
-    if x in (None, ""):
-        return None
-    try:
-        return float(x)
-    except Exception:
-        return None
-
-def _event_year(s: Any) -> Optional[int]:
-    if not s:
-        return None
-    try:
-        return datetime.fromisoformat(str(s).replace("Z","")).year
-    except Exception:
-        ss = str(s)
-        if len(ss) >= 4 and ss[:4].isdigit():
-            return int(ss[:4])
-        return None
-
 @st.cache_data(show_spinner=False)
 def load_json_records(path: str, limit: int | None = None) -> Tuple[Dict[int, str], Dict[int, dict]]:
     p = Path(path)
     raw = json.loads(p.read_text(encoding="utf-8"))
     if isinstance(raw, dict):
-        for k in ("items","data","results","Records"):
+        for k in ("items", "data", "results", "Records"):
             if isinstance(raw.get(k), list):
                 raw = raw[k]
                 break
@@ -71,24 +62,30 @@ def load_json_records(path: str, limit: int | None = None) -> Tuple[Dict[int, st
             continue
         n += 1
         docs[n] = text
+
+        # base meta
         m = {k: r.get(k) for k in META_FIELDS}
 
-        # stable id preference
-        for stable in ("NtsbNumber","ReportNo","EventID","MKey","Oid"):
+        # cast lat/lon
+        for k in ("Latitude", "Longitude"):
+            if m.get(k) not in (None, ""):
+                try:
+                    m[k] = float(m[k])
+                except Exception:
+                    m[k] = None
+
+        # prefer a stable id
+        for stable in ("NtsbNumber", "ReportNo", "EventID", "MKey", "Oid"):
             v = r.get(stable)
             if v not in (None, ""):
                 m["orig_id"] = v
                 break
 
-        # lat/lon
-        m["Latitude"] = _safe_float(m.get("Latitude"))
-        m["Longitude"] = _safe_float(m.get("Longitude"))
-
-        # Vehicles[0]
+        # try Vehicles[0] for aircraft fields
         vlist = r.get("Vehicles") or r.get("vehicles")
         if isinstance(vlist, list) and vlist:
             v0 = vlist[0]
-            for k in ("Make","Model","AircraftCategory","DamageLevel","RegulationFlightConductedUnder"):
+            for k in VEHICLE_FIELDS:
                 if v0.get(k) not in (None, ""):
                     m[k] = v0[k]
 
@@ -97,225 +94,176 @@ def load_json_records(path: str, limit: int | None = None) -> Tuple[Dict[int, st
             break
     return docs, meta
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=True)
 def build_index(docs: Dict[int, str]) -> InvertedIndex:
     idx = InvertedIndex()
     idx.build(docs.items())
     return idx
 
-# ---------- UI Config ----------
+# ---------- UI ----------
 st.set_page_config(page_title="AeroSearch", page_icon="✈️", layout="wide")
-
-# Global CSS: sticky right pane, scrollable results
-st.markdown("""
-<style>
-.results-pane {
-  max-height: 70vh;
-  overflow-y: auto;
-  padding-right: .5rem;
-}
-.sticky-pane {
-  position: sticky;
-  top: 6rem;
-}
-.header-tight p { margin-bottom: 0.25rem; }
-</style>
-""", unsafe_allow_html=True)
-
 st.title("AeroSearch — Aviation Incident/Accident Narrative Retrieval")
 
-# ---------- Data bootstrapping ----------
-if "docs_cache" not in st.session_state:
-    with st.status("Loading dataset and building index…", expanded=True) as status:
-        st.write("Reading JSON …")
-        docs, meta = load_json_records(DEFAULT_JSON, limit=None)
-        st.write(f"Loaded {len(docs):,} records.")
-        st.write("Building inverted index …")
-        idx = build_index(docs)
-        st.write(f"Indexed {idx.num_docs:,} documents.")
-        st.session_state["docs_cache"] = docs
-        st.session_state["meta_cache"] = meta
-        st.session_state["index_cache"] = idx
-        # persistent UI state
-        st.session_state["detail_doc"] = None
-        st.session_state["last_hits"] = None
-        st.session_state["last_mode"] = None  # "bm25" | "bool" | "bool_rerank"
-        st.session_state["last_topk"] = 10
-        status.update(label="Ready", state="complete", expanded=False)
+with st.sidebar:
+    st.header("Dataset")
+    data_path = st.text_input("JSON file path", "data/sample_docs1.json")
+    limit = st.number_input("Load first N records (0 = all)", value=0, min_value=0, step=1000)
+    load_btn = st.button("Load / Reload Data", type="primary")
 
-docs: Dict[int, str] = st.session_state["docs_cache"]
-meta: Dict[int, dict] = st.session_state["meta_cache"]
-idx: InvertedIndex = st.session_state["index_cache"]
+    st.divider()
+    st.header("Search mode")
+    mode = st.radio("Choose", ["BM25", "Boolean (with BM25 re-rank)"], index=0)
+
+    st.divider()
+    st.caption("Tip: Multi-term queries are faster & better. Use `bool:` style without the prefix here (this toggle handles it).")
+
+# Load data (once)
+if load_btn or "docs_cache" not in st.session_state:
+    docs, meta = load_json_records(data_path, None if limit == 0 else limit)
+    st.session_state["docs_cache"] = docs
+    st.session_state["meta_cache"] = meta
+    st.session_state["index_cache"] = build_index(docs)
+
+docs = st.session_state.get("docs_cache", {})
+meta = st.session_state.get("meta_cache", {})
+idx: InvertedIndex = st.session_state.get("index_cache", build_index({}))
+
+st.success(f"Loaded {len(docs)} docs. Indexed over {idx.num_docs} documents.")
+
+query = st.text_input(
+    "Enter your query",
+    placeholder='e.g., "runway excursion landing" or (icing /5 pitot) AND (airspeed OR indications)'
+)
+topk = st.slider("Results to display", 5, 50, 10)
+
+# BM25 object (reuse per run)
 bm25 = BM25(idx)
 
-# Summary banner
-with st.spinner("Preparing summary…"):
-    years = [y for y in (_event_year(m.get("EventDate")) for m in meta.values()) if y is not None]
-    min_y = min(years) if years else "—"
-    max_y = max(years) if years else "—"
-st.markdown(
-    f"<div class='header-tight'><p><strong>Contains {len(docs):,} indexed narratives between {min_y} and {max_y} as reported by NTSB.</strong></p></div>",
-    unsafe_allow_html=True
-)
-
-# ---------- Search Controls ----------
-tabs = st.tabs(["Search", "Advanced (Boolean)"])
-
-with tabs[0]:
-    col_left, col_right = st.columns([2,1], vertical_alignment="center")
-    with col_left:
-        q_simple = st.text_input("Search", placeholder="Try: runway excursion landing", key="q_simple")
-    with col_right:
-        topk_simple = st.slider("Results", 5, 50, 10, key="topk_simple")
-    run_simple = st.button("Run Search", type="primary", key="run_simple")
-
-with tabs[1]:
-    col_left_b, col_right_b = st.columns([2,1], vertical_alignment="center")
-    with col_left_b:
-        q_bool = st.text_input("Boolean query", placeholder="(icing /5 pitot) AND (airspeed OR indications)", key="q_bool")
-    with col_right_b:
-        topk_bool = st.slider("Results", 5, 50, 10, key="topk_bool")
-    run_bool = st.button("Run Advanced Search", type="primary", key="run_bool")
-    # Optional: separate button to run BM25 re-rank only when desired
-    run_rerank = st.checkbox("Also re-rank Boolean matches with BM25", value=True, key="run_rerank")
-
-st.divider()
-
-# ---------- Persist results in session_state ----------
-def _set_results(hits, mode: str, topk: int):
-    st.session_state["last_hits"] = hits
-    st.session_state["last_mode"] = mode
-    st.session_state["last_topk"] = topk
-
-# ---------- Renderers ----------
-def header_line(m: dict) -> str:
-    bits = [m.get("EventDate"), m.get("City"), m.get("State"), m.get("Country"),
+def format_header(m: dict) -> str:
+    bits = [m.get("EventDate"), m.get("City"), m.get("State"),
             m.get("Make"), m.get("Model"), m.get("EventType")]
     return " | ".join([str(x) for x in bits if x])
 
-def render_details_panel(detail_id: Optional[int]):
-    st.markdown("<div class='sticky-pane'>", unsafe_allow_html=True)
-    st.subheader("Case Details")
-    if not detail_id:
-        st.info("Select **Details** on a result to inspect full metadata.")
-        st.markdown("</div>", unsafe_allow_html=True)
-        return
-    mm = meta.get(detail_id, {})
-    tt = docs.get(detail_id, "")
+def _nice_label(k: str) -> str:
+    return {
+        "EventDate": "Event date",
+        "EventType": "Event type",
+        "HighestInjury": "Highest injury level",
+        "FatalInjuryCount": "Fatalities",
+        "SeriousInjuryCount": "Serious injuries",
+        "MinorInjuryCount": "Minor injuries",
+        "Country": "Country",
+        "State": "State",
+        "City": "City",
+        "AirportId": "Airport ID",
+        "AirportName": "Airport name",
+        "AirCraftDamage": "Aircraft damage",
+        "AccidentSiteCondition": "Site conditions",
+        "WeatherCondition": "Weather",
+        "Make": "Make",
+        "Model": "Model",
+        "AircraftCategory": "Aircraft category",
+        "DamageLevel": "Damage level",
+        "RegulationFlightConductedUnder": "Regulation",
+        "NumberOfEngines": "Engines",
+        "OperatorName": "Operator",
+        "RegistrationNumber": "Registration",
+        "flightScheduledType": "Schedule type",
+        "flightServiceType": "Service type",
+        "Latitude": "Latitude",
+        "Longitude": "Longitude",
+        "NtsbNumber": "NTSB number",
+        "ReportNo": "Report number",
+        "orig_id": "Record ID",
+    }.get(k, k)
 
-    st.markdown(f"**doc {detail_id}**")
-    st.write(header_line(mm))
+DETAIL_ORDER = [
+    # core identity
+    "orig_id", "NtsbNumber", "ReportNo",
+    # timing/location
+    "EventDate", "Country", "State", "City", "AirportId", "AirportName",
+    # event/outcome
+    "EventType", "HighestInjury", "FatalInjuryCount", "SeriousInjuryCount", "MinorInjuryCount",
+    # aircraft & ops
+    "Make", "Model", "AircraftCategory", "NumberOfEngines",
+    "OperatorName", "RegistrationNumber", "RegulationFlightConductedUnder",
+    # environment
+    "WeatherCondition", "AccidentSiteCondition", "AirCraftDamage",
+    # coords at end
+    "Latitude", "Longitude",
+]
 
-    lat, lon = mm.get("Latitude"), mm.get("Longitude")
-    if lat is not None and lon is not None:
-        st.map(pd.DataFrame([{"latitude": lat, "longitude": lon}]))
+def _detail_dataframe(m: dict) -> pd.DataFrame:
+    rows = []
+    for k in DETAIL_ORDER:
+        if k in m and m[k] not in (None, "", []):
+            rows.append({"Field": _nice_label(k), "Value": m[k]})
+    return pd.DataFrame(rows)
 
-    grid_left, grid_right = st.columns(2)
-    with grid_left:
-        st.markdown("**Location & Ops**")
-        st.write(f"City: {mm.get('City') or '—'}")
-        st.write(f"Country: {mm.get('Country') or '—'}")
-        st.write(f"Airport: {mm.get('AirportName') or '—'} ({mm.get('AirportId') or '—'})")
-        st.write(f"Event Type: {mm.get('EventType') or '—'}")
-        st.write(f"Highest Injury: {mm.get('HighestInjury') or '—'}")
-        st.write(f"Accident Site: {mm.get('AccidentSiteCondition') or '—'}")
-        st.write(f"Latitude: {lat if lat is not None else '—'}")
-        st.write(f"Longitude: {lon if lon is not None else '—'}")
+def show_hits(hits: List[tuple[int, float]] | List[int], with_scores=True):
+    rows_for_map = []
+    for rank, item in enumerate(hits[:topk], start=1):
+        if isinstance(item, tuple):
+            d, s = item
+        else:
+            d, s = item, None
+        m = meta.get(d, {})
+        header = format_header(m)
+        snippet = docs[d][:240] + ("…" if len(docs[d]) > 240 else "")
+        lat, lon = m.get("Latitude"), m.get("Longitude")
 
-    with grid_right:
-        st.markdown("**Aircraft & IDs**")
-        st.write(f"Make/Model: {(mm.get('Make') or '—')} {(mm.get('Model') or '')}".strip())
-        st.write(f"Category: {mm.get('AircraftCategory') or '—'}")
-        st.write(f"Damage Level: {mm.get('DamageLevel') or '—'}")
-        st.write(f"NTSB Number: {mm.get('NtsbNumber') or '—'}")
-        st.write(f"Report No: {mm.get('ReportNo') or '—'}")
-        st.write(f"Fatal Injuries: {mm.get('FatalInjuryCount') or 0}")
-        st.write(f"Serious Injuries: {mm.get('SeriousInjuryCount') or 0}")
-        st.write(f"Minor Injuries: {mm.get('MinorInjuryCount') or 0}")
-        if mm.get("DocketUrl"):
-            st.link_button("Open Docket", mm["DocketUrl"])
+        st.markdown(f"**{rank}. doc {d}**" + (f" &nbsp;&nbsp;`score={s:.3f}`" if (with_scores and s is not None) else ""))
+        if header:
+            st.write(header)
+        if lat is not None and lon is not None:
+            st.write(f"Lat: {lat}, Lon: {lon}")
+            rows_for_map.append({"latitude": lat, "longitude": lon, "doc": d})
 
-    st.markdown("**Narrative**")
-    st.write(tt)
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.write(snippet)
 
-def render_results_list(hits, topk: int, with_scores=True):
-    res_col, det_col = st.columns([1.5, 1.0], gap="large")
+        # --- READ MORE & DETAILS ---
+        with st.expander("Read more & details"):
+            st.markdown("**Full narrative**")
+            st.write(docs[d])
 
-    with res_col:
-        st.markdown("<div class='results-pane'>", unsafe_allow_html=True)
+            col1, col2 = st.columns([2, 1], vertical_alignment="top")
+            with col1:
+                st.markdown("**Metadata**")
+                df = _detail_dataframe(m)
+                if not df.empty:
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No additional metadata available for this record.")
 
-        if not hits:
-            st.warning("No results found. Try a broader query, or check your Boolean syntax.")
-            st.markdown("</div>", unsafe_allow_html=True)
-            with det_col:
-                render_details_panel(st.session_state.get("detail_doc"))
-            return
-
-        for rank, item in enumerate(hits[:topk], start=1):
-            d, s = (item if isinstance(item, tuple) else (item, None))
-            m = meta.get(d, {})
-
-            st.markdown(
-                f"**{rank}. doc {d}**" + (f" &nbsp;&nbsp;`score={s:.3f}`" if (with_scores and s is not None) else "")
-            )
-            head = header_line(m)
-            if head:
-                st.write(head)
-
-            lat, lon = m.get("Latitude"), m.get("Longitude")
-            if lat is not None and lon is not None:
-                st.caption(f"Lat: {lat}, Lon: {lon}")
-
-            full_text = docs[d]
-            short = full_text[:240] + ("…" if len(full_text) > 240 else "")
-            st.write(short)
-            with st.expander("Read more"):
-                st.write(full_text)
-
-            c1, c2, c3 = st.columns([0.25,0.25,0.5])
-            with c1:
-                if st.button("Details", key=f"det_{d}", use_container_width=True):
-                    st.session_state["detail_doc"] = d
-            with c2:
-                if m.get("DocketUrl"):
-                    st.link_button("Docket", m["DocketUrl"], use_container_width=True)
-            with c3:
+            with col2:
+                if lat is not None and lon is not None:
+                    st.markdown("**Location**")
+                    _df = pd.DataFrame([{"latitude": lat, "longitude": lon}])
+                    st.map(_df, latitude="latitude", longitude="longitude")
                 if m.get("orig_id"):
-                    st.caption(f"ID: {m['orig_id']}")
+                    st.markdown("**IDs**")
+                    st.code(str(m["orig_id"]), language="text")
+                if m.get("DocketUrl"):
+                    st.markdown(f"[Docket link]({m['DocketUrl']})")
 
-            st.divider()
+        st.divider()
 
-        st.markdown("</div>", unsafe_allow_html=True)
+    # map (if any coords in the current result set)
+    if rows_for_map:
+        st.markdown("**Map of listed results**")
+        df_all = pd.DataFrame(rows_for_map)
+        st.map(df_all, latitude="latitude", longitude="longitude")
 
-    with det_col:
-        render_details_panel(st.session_state.get("detail_doc"))
-
-# ---------- Run queries (persist & render) ----------
-if run_simple:
-    with st.spinner("Searching…"):
-        ranked = bm25.score(q_simple or "")
-    _set_results(ranked, mode="bm25", topk=topk_simple)
-
-if run_bool:
-    with st.spinner("Running Boolean search…"):
-        doc_ids = evaluate_query(idx, q_bool or "")
-    # If checkbox on, re-rank; else show boolean only
-    if run_rerank and doc_ids:
-        with st.spinner("Re-ranking Boolean matches with BM25…"):
-            reranked = bm25.score(q_bool or "", candidate_docs=doc_ids)
-        _set_results(reranked, mode="bool_rerank", topk=topk_bool)
+if query:
+    if mode.startswith("BM25"):
+        ranked = bm25.score(query)
+        st.subheader("BM25 results")
+        show_hits(ranked, with_scores=True)
     else:
-        _set_results(doc_ids, mode="bool", topk=topk_bool)
-
-# Always render whatever results we have in session (so "Details" won't wipe the view)
-last_hits = st.session_state.get("last_hits")
-last_topk = st.session_state.get("last_topk", 10)
-last_mode = st.session_state.get("last_mode")
-
-if last_hits is not None:
-    label = {"bm25": "BM25 results", "bool": "Boolean results", "bool_rerank": "BM25 re-rank of Boolean matches"}.get(last_mode, "Results")
-    st.subheader(label)
-    render_results_list(last_hits, topk=last_topk, with_scores=(last_mode != "bool"))
-else:
-    st.info("Type a query in **Search** or **Advanced (Boolean)** and click the button to see results.")
+        doc_ids = evaluate_query(idx, query)
+        st.subheader(f"Boolean results (matched {len(doc_ids)} docs)")
+        show_hits(doc_ids, with_scores=False)
+        if doc_ids:
+            st.subheader("BM25 re-rank of Boolean matches")
+            reranked = bm25.score(query, candidate_docs=doc_ids)
+            show_hits(reranked, with_scores=True)
