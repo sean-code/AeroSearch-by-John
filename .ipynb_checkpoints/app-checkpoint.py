@@ -10,10 +10,10 @@ from src.index import InvertedIndex
 from src.boolean_query import evaluate_query
 from src.bm25 import BM25
 
-# ---------- Data loading (reuse your JSON loader logic) ----------
+# ---------- Config ----------
+st.set_page_config(page_title="AeroSearch", page_icon="✈️", layout="wide")
 NARRATIVE_FIELDS = ["ProbableCause", "AnalysisNarrative", "FactualNarrative", "PrelimNarrative"]
 
-# Add more research-useful fields to metadata
 META_FIELDS = [
     # IDs / dates / place
     "NtsbNumber", "ReportNo", "EventDate", "Country", "City", "State",
@@ -25,12 +25,12 @@ META_FIELDS = [
     "Latitude", "Longitude",
 ]
 
-# Also try to grab these from Vehicles[0]
 VEHICLE_FIELDS = [
     "Make", "Model", "AircraftCategory", "DamageLevel", "RegulationFlightConductedUnder",
     "NumberOfEngines", "OperatorName", "RegistrationNumber", "flightScheduledType", "flightServiceType"
 ]
 
+# ---------- Helpers ----------
 def _concat_narratives(rec: dict) -> str:
     parts: List[str] = []
     for f in NARRATIVE_FIELDS:
@@ -40,7 +40,7 @@ def _concat_narratives(rec: dict) -> str:
             parts.append(v)
     return "  ".join(parts).strip()
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=True)
 def load_json_records(path: str, limit: int | None = None) -> Tuple[Dict[int, str], Dict[int, dict]]:
     p = Path(path)
     raw = json.loads(p.read_text(encoding="utf-8"))
@@ -99,45 +99,6 @@ def build_index(docs: Dict[int, str]) -> InvertedIndex:
     idx = InvertedIndex()
     idx.build(docs.items())
     return idx
-
-# ---------- UI ----------
-st.set_page_config(page_title="AeroSearch", page_icon="✈️", layout="wide")
-st.title("AeroSearch — Aviation Incident/Accident Narrative Retrieval")
-
-with st.sidebar:
-    st.header("Dataset")
-    data_path = st.text_input("JSON file path", "data/sample_docs1.json")
-    limit = st.number_input("Load first N records (0 = all)", value=0, min_value=0, step=1000)
-    load_btn = st.button("Load / Reload Data", type="primary")
-
-    st.divider()
-    st.header("Search mode")
-    mode = st.radio("Choose", ["BM25", "Boolean (with BM25 re-rank)"], index=0)
-
-    st.divider()
-    st.caption("Tip: Multi-term queries are faster & better. Use `bool:` style without the prefix here (this toggle handles it).")
-
-# Load data (once)
-if load_btn or "docs_cache" not in st.session_state:
-    docs, meta = load_json_records(data_path, None if limit == 0 else limit)
-    st.session_state["docs_cache"] = docs
-    st.session_state["meta_cache"] = meta
-    st.session_state["index_cache"] = build_index(docs)
-
-docs = st.session_state.get("docs_cache", {})
-meta = st.session_state.get("meta_cache", {})
-idx: InvertedIndex = st.session_state.get("index_cache", build_index({}))
-
-st.success(f"Loaded {len(docs)} docs. Indexed over {idx.num_docs} documents.")
-
-query = st.text_input(
-    "Enter your query",
-    placeholder='e.g., "runway excursion landing" or (icing /5 pitot) AND (airspeed OR indications)'
-)
-topk = st.slider("Results to display", 5, 50, 10)
-
-# BM25 object (reuse per run)
-bm25 = BM25(idx)
 
 def format_header(m: dict) -> str:
     bits = [m.get("EventDate"), m.get("City"), m.get("State"),
@@ -200,13 +161,10 @@ def _detail_dataframe(m: dict) -> pd.DataFrame:
             rows.append({"Field": _nice_label(k), "Value": m[k]})
     return pd.DataFrame(rows)
 
-def show_hits(hits: List[tuple[int, float]] | List[int], with_scores=True):
+def render_hits(docs, meta, hits: List[tuple[int, float]] | List[int], topk: int, with_scores=True):
     rows_for_map = []
     for rank, item in enumerate(hits[:topk], start=1):
-        if isinstance(item, tuple):
-            d, s = item
-        else:
-            d, s = item, None
+        d, s = item if isinstance(item, tuple) else (item, None)
         m = meta.get(d, {})
         header = format_header(m)
         snippet = docs[d][:240] + ("…" if len(docs[d]) > 240 else "")
@@ -254,16 +212,113 @@ def show_hits(hits: List[tuple[int, float]] | List[int], with_scores=True):
         df_all = pd.DataFrame(rows_for_map)
         st.map(df_all, latitude="latitude", longitude="longitude")
 
-if query:
-    if mode.startswith("BM25"):
-        ranked = bm25.score(query)
-        st.subheader("BM25 results")
-        show_hits(ranked, with_scores=True)
+# ---------- Sidebar ----------
+st.title("AeroSearch — Aviation Incident/Accident Narrative Retrieval")
+
+with st.sidebar:
+    st.header("Dataset")
+    data_path = st.text_input("JSON file path", "data/sample_docs1.json", key="data_path")
+    limit = st.number_input("Load first N records (0 = all)", value=0, min_value=0, step=1000, key="limit")
+    load_btn = st.button("Load / Reload Data", type="primary")
+
+    st.divider()
+    st.header("Search mode")
+    mode = st.radio("Choose", ["BM25", "Boolean (with BM25 re-rank)"], index=0, key="mode")
+
+    st.divider()
+    st.caption("Tip: Multi-term queries are faster & better. Use proximity and Boolean operators when needed.")
+
+# ---------- Load data / build index once ----------
+if load_btn or "docs_cache" not in st.session_state:
+    docs, meta = load_json_records(data_path, None if limit == 0 else limit)
+    st.session_state["docs_cache"] = docs
+    st.session_state["meta_cache"] = meta
+    st.session_state["index_cache"] = build_index(docs)
+    st.session_state["results_cache"] = None  # clear previous results
+    st.session_state["last_query"] = ""
+    st.session_state["last_topk"] = 10
+    st.session_state["last_mode"] = mode
+
+docs = st.session_state.get("docs_cache", {})
+meta = st.session_state.get("meta_cache", {})
+idx: InvertedIndex = st.session_state.get("index_cache", build_index({}))
+bm25 = BM25(idx)
+
+st.success(f"Loaded {len(docs)} docs. Indexed over {idx.num_docs} documents.")
+
+# ---------- Query UI ----------
+colq1, colq2 = st.columns([4,1])
+with colq1:
+    query = st.text_input(
+        "Enter your query",
+        placeholder='e.g., unstable approach tailwind long landing excursion OR (icing /5 pitot) AND (airspeed OR indications)',
+        key="query_text"
+    )
+with colq2:
+    topk = st.slider("Top-k", 5, 50, st.session_state.get("last_topk", 10), key="topk")
+
+search_btn = st.button("Search", type="primary", use_container_width=True)
+
+# ---------- Run search only when Search is clicked ----------
+if search_btn:
+    st.session_state["last_query"] = query
+    st.session_state["last_topk"] = topk
+    st.session_state["last_mode"] = mode
+
+    if not query.strip():
+        st.warning("Please enter a query.")
+        st.session_state["results_cache"] = None
     else:
-        doc_ids = evaluate_query(idx, query)
-        st.subheader(f"Boolean results (matched {len(doc_ids)} docs)")
-        show_hits(doc_ids, with_scores=False)
-        if doc_ids:
-            st.subheader("BM25 re-rank of Boolean matches")
-            reranked = bm25.score(query, candidate_docs=doc_ids)
-            show_hits(reranked, with_scores=True)
+        with st.status("Searching…", expanded=False) as status:
+            try:
+                if mode.startswith("BM25"):
+                    status.update(label="Scoring with BM25…")
+                    ranked = bm25.score(query)
+                    st.session_state["results_cache"] = {"type": "bm25", "primary": ranked}
+                    status.update(label="Done.", state="complete")
+                else:
+                    status.update(label="Evaluating Boolean query…")
+                    doc_ids = evaluate_query(idx, query)
+                    status.update(label=f"Matched {len(doc_ids)} candidate docs. Re-ranking…")
+                    reranked = bm25.score(query, candidate_docs=doc_ids) if doc_ids else []
+                    st.session_state["results_cache"] = {
+                        "type": "boolean",
+                        "primary": doc_ids,
+                        "rerank": reranked
+                    }
+                    status.update(label="Done.", state="complete")
+            except Exception as e:
+                status.update(label="Error during search.", state="error")
+                st.error(str(e))
+                st.session_state["results_cache"] = None
+
+# ---------- Display results (persist across reruns) ----------
+res = st.session_state.get("results_cache")
+if res:
+    q_disp = st.session_state.get("last_query", "")
+    k_disp = st.session_state.get("last_topk", 10)
+    mode_disp = st.session_state.get("last_mode", "BM25")
+
+    st.caption(f"Showing results for **{mode_disp}** · **k={k_disp}** · Query: `{q_disp}`")
+
+    if res["type"] == "bm25":
+        st.subheader("BM25 results")
+        if not res["primary"]:
+            st.info("No results found.")
+        else:
+            render_hits(docs, meta, res["primary"], topk=k_disp, with_scores=True)
+
+    elif res["type"] == "boolean":
+        prim = res.get("primary", [])
+        st.subheader(f"Boolean results (matched {len(prim)} docs)")
+        if prim:
+            render_hits(docs, meta, prim, topk=k_disp, with_scores=False)
+        else:
+            st.info("No matches for the Boolean query.")
+
+        rr = res.get("rerank", [])
+        st.subheader("BM25 re-rank of Boolean matches")
+        if rr:
+            render_hits(docs, meta, rr, topk=k_disp, with_scores=True)
+        else:
+            st.info("No matches to re-rank.")
