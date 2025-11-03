@@ -1,6 +1,7 @@
 # AeroSearch — Incident/Accident Narrative Retrieval
 
 > Lightweight IR toolkit for aviation incident/accident narratives with Boolean/proximity search and BM25 ranking.
+> Comprises Narratives Between 01/01/2019 and 11/01/2025 : as Referenced by NTSB
 
 ---
 
