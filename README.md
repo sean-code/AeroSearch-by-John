@@ -39,6 +39,7 @@ ir_aviation/
 | `src/bm25.py`                | BM25 scorer over the indexed corpus; returns ranked results. |
 | `src/eval.py`                | Evaluation helpers (MAP, nDCG, Recall@k). |
 | `main.py`                | CLI loader (JSON/CSV), index builder, interactive search loop with pretty printing. |
+| `app.py`                | User Interface by Streamlit- comprises index builder, interactive search and much more |
 
 ---
 

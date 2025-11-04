@@ -1,6 +1,7 @@
 # AeroSearch — Incident/Accident Narrative Retrieval
 
 > Lightweight IR toolkit for aviation incident/accident narratives with Boolean/proximity search and BM25 ranking.
+> Comprises Narratives Between 01/01/2019 and 11/01/2025 : as Referenced by NTSB
 
 ---
 
@@ -19,6 +20,7 @@ ir_aviation/
     bm25.py                     # BM25 ranker over the same index
     eval.py                     # MAP, nDCG, Recall@k
   main.py                       # end-to-end CLI with interactive search (REPL)
+  app.py                       # UI Search platform
   README.md
 
 ```
@@ -37,6 +39,7 @@ ir_aviation/
 | `src/bm25.py`                | BM25 scorer over the indexed corpus; returns ranked results. |
 | `src/eval.py`                | Evaluation helpers (MAP, nDCG, Recall@k). |
 | `main.py`                | CLI loader (JSON/CSV), index builder, interactive search loop with pretty printing. |
+| `app.py`                | User Interface by Streamlit- comprises index builder, interactive search and much more |
 
 ---
 
