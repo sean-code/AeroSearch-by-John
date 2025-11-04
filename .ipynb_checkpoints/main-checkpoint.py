@@ -274,6 +274,7 @@ def main():
             docs, meta = load_ntsb_json(demo_json)
             print(f"[i] Loaded {len(docs)} docs from {demo_json}")
         else:
+            # Sample Documents indexed to avoid having an empty corpora
             docs = {
                 1: "Night visual approach with unexpected tailwind led to long landing and runway excursion.",
                 2: "Climb-out icing after takeoff; pitot heat oversight led to airspeed discrepancies; returned to land.",
@@ -297,7 +298,7 @@ def main():
             docs, meta = load_ntsb_csv(path, text_col=text_col)
             print(f"[i] Loaded {len(docs)} docs from {path} (text_col='{text_col}')")
 
-    idx = InvertedIndex()  # If you added champion lists, you can pass thresholds here
+    idx = InvertedIndex()
     idx.build(docs.items())
     print(f"[i] Built index over {idx.num_docs} documents.")
     repl(idx, docs, meta)

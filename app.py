@@ -1,7 +1,7 @@
 # app.py
 import json
 from pathlib import Path
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Tuple
 import pandas as pd
 import streamlit as st
 
@@ -10,18 +10,22 @@ from src.index import InvertedIndex
 from src.boolean_query import evaluate_query
 from src.bm25 import BM25
 
-# ---------- Config ----------
+# ---------- App Config ----------
 st.set_page_config(page_title="AeroSearch", page_icon="✈️", layout="wide")
+
+# Fixed dataset settings (visible but not editable)
+DATA_PATH_DEFAULT = "data/sample_docs1.json"  # change in code if needed
+DATA_LIMIT_DEFAULT = 0                        # 0 = load all
+
+# Narrative fields we stitch together for search
 NARRATIVE_FIELDS = ["ProbableCause", "AnalysisNarrative", "FactualNarrative", "PrelimNarrative"]
 
+# Metadata fields to show
 META_FIELDS = [
-    # IDs / dates / place
     "NtsbNumber", "ReportNo", "EventDate", "Country", "City", "State",
     "AirportId", "AirportName",
-    # event / outcome
     "EventType", "HighestInjury", "FatalInjuryCount", "SeriousInjuryCount", "MinorInjuryCount",
     "AirCraftDamage", "AccidentSiteCondition", "WeatherCondition",
-    # coords
     "Latitude", "Longitude",
 ]
 
@@ -36,8 +40,7 @@ def _concat_narratives(rec: dict) -> str:
     for f in NARRATIVE_FIELDS:
         v = rec.get(f)
         if isinstance(v, str) and v.strip():
-            v = v.replace("\r\n", " ").replace("\n", " ").strip()
-            parts.append(v)
+            parts.append(v.replace("\r\n", " ").replace("\n", " ").strip())
     return "  ".join(parts).strip()
 
 @st.cache_data(show_spinner=True)
@@ -51,7 +54,7 @@ def load_json_records(path: str, limit: int | None = None) -> Tuple[Dict[int, st
                 break
         else:
             raw = list(raw.values())
-    assert isinstance(raw, list), "JSON must be an array or a dict that contains a list"
+    assert isinstance(raw, list), "JSON must be an array or a dict containing a list"
 
     docs: Dict[int, str] = {}
     meta: Dict[int, dict] = {}
@@ -63,7 +66,6 @@ def load_json_records(path: str, limit: int | None = None) -> Tuple[Dict[int, st
         n += 1
         docs[n] = text
 
-        # base meta
         m = {k: r.get(k) for k in META_FIELDS}
 
         # cast lat/lon
@@ -81,7 +83,7 @@ def load_json_records(path: str, limit: int | None = None) -> Tuple[Dict[int, st
                 m["orig_id"] = v
                 break
 
-        # try Vehicles[0] for aircraft fields
+        # Vehicles[0] enrich
         vlist = r.get("Vehicles") or r.get("vehicles")
         if isinstance(vlist, list) and vlist:
             v0 = vlist[0]
@@ -139,18 +141,12 @@ def _nice_label(k: str) -> str:
     }.get(k, k)
 
 DETAIL_ORDER = [
-    # core identity
     "orig_id", "NtsbNumber", "ReportNo",
-    # timing/location
     "EventDate", "Country", "State", "City", "AirportId", "AirportName",
-    # event/outcome
     "EventType", "HighestInjury", "FatalInjuryCount", "SeriousInjuryCount", "MinorInjuryCount",
-    # aircraft & ops
     "Make", "Model", "AircraftCategory", "NumberOfEngines",
     "OperatorName", "RegistrationNumber", "RegulationFlightConductedUnder",
-    # environment
     "WeatherCondition", "AccidentSiteCondition", "AirCraftDamage",
-    # coords at end
     "Latitude", "Longitude",
 ]
 
@@ -179,7 +175,6 @@ def render_hits(docs, meta, hits: List[tuple[int, float]] | List[int], topk: int
 
         st.write(snippet)
 
-        # --- READ MORE & DETAILS ---
         with st.expander("Read more & details"):
             st.markdown("**Full narrative**")
             st.write(docs[d])
@@ -192,7 +187,6 @@ def render_hits(docs, meta, hits: List[tuple[int, float]] | List[int], topk: int
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
                     st.info("No additional metadata available for this record.")
-
             with col2:
                 if lat is not None and lon is not None:
                     st.markdown("**Location**")
@@ -206,48 +200,46 @@ def render_hits(docs, meta, hits: List[tuple[int, float]] | List[int], topk: int
 
         st.divider()
 
-    # map (if any coords in the current result set)
     if rows_for_map:
         st.markdown("**Map of listed results**")
         df_all = pd.DataFrame(rows_for_map)
         st.map(df_all, latitude="latitude", longitude="longitude")
 
-# ---------- Sidebar ----------
-st.title("AeroSearch — Aviation Incident/Accident Narrative Retrieval")
+# ---------- Title ----------
+st.title("AeroSearch: Aviation Incident/Accident Narrative Retrieval")
 
+# ---------- Sidebar (fixed path shown, disabled, but the Limit/Reload enabled) ----------
 with st.sidebar:
-    st.header("Dataset")
-    data_path = st.text_input("JSON file path", "data/sample_docs1.json", key="data_path")
-    limit = st.number_input("Load first N records (0 = all)", value=0, min_value=0, step=1000, key="limit")
+    st.header("Dataset (fixed)")
+    st.text_input("JSON file path", DATA_PATH_DEFAULT, disabled=True)
+    limit = st.number_input("Load first N records (0 = all)", value=DATA_LIMIT_DEFAULT, min_value=0, step=1000, key="limit")
     load_btn = st.button("Load / Reload Data", type="primary")
 
     st.divider()
     st.header("Search mode")
     mode = st.radio("Choose", ["BM25", "Boolean (with BM25 re-rank)"], index=0, key="mode")
+    st.caption("Tip: Multi-term queries often perform better; use Boolean/proximity when needed.")
 
-    st.divider()
-    st.caption("Tip: Multi-term queries are faster & better. Use proximity and Boolean operators when needed.")
-
-# ---------- Load data / build index once ----------
+# ---------- Load data / build index ----------
 if load_btn or "docs_cache" not in st.session_state:
-    docs, meta = load_json_records(data_path, None if limit == 0 else limit)
+    docs, meta = load_json_records(DATA_PATH_DEFAULT, None if limit == 0 else limit)
     st.session_state["docs_cache"] = docs
     st.session_state["meta_cache"] = meta
     st.session_state["index_cache"] = build_index(docs)
-    st.session_state["results_cache"] = None  # clear previous results
+    st.session_state["results_cache"] = None
     st.session_state["last_query"] = ""
     st.session_state["last_topk"] = 10
     st.session_state["last_mode"] = mode
 
-docs = st.session_state.get("docs_cache", {})
-meta = st.session_state.get("meta_cache", {})
-idx: InvertedIndex = st.session_state.get("index_cache", build_index({}))
+docs = st.session_state["docs_cache"]
+meta = st.session_state["meta_cache"]
+idx: InvertedIndex = st.session_state["index_cache"]
 bm25 = BM25(idx)
 
 st.success(f"Loaded {len(docs)} docs. Indexed over {idx.num_docs} documents.")
 
 # ---------- Query UI ----------
-colq1, colq2 = st.columns([4,1])
+colq1, colq2 = st.columns([4, 1])
 with colq1:
     query = st.text_input(
         "Enter your query",
@@ -259,7 +251,7 @@ with colq2:
 
 search_btn = st.button("Search", type="primary", use_container_width=True)
 
-# ---------- Run search only when Search is clicked ----------
+# ---------- Run search ----------
 if search_btn:
     st.session_state["last_query"] = query
     st.session_state["last_topk"] = topk
@@ -292,7 +284,7 @@ if search_btn:
                 st.error(str(e))
                 st.session_state["results_cache"] = None
 
-# ---------- Display results (persist across reruns) ----------
+# ---------- Display results ----------
 res = st.session_state.get("results_cache")
 if res:
     q_disp = st.session_state.get("last_query", "")
@@ -307,7 +299,6 @@ if res:
             st.info("No results found.")
         else:
             render_hits(docs, meta, res["primary"], topk=k_disp, with_scores=True)
-
     elif res["type"] == "boolean":
         prim = res.get("primary", [])
         st.subheader(f"Boolean results (matched {len(prim)} docs)")
@@ -315,7 +306,6 @@ if res:
             render_hits(docs, meta, prim, topk=k_disp, with_scores=False)
         else:
             st.info("No matches for the Boolean query.")
-
         rr = res.get("rerank", [])
         st.subheader("BM25 re-rank of Boolean matches")
         if rr:
